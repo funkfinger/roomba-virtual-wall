@@ -56,7 +56,7 @@ unsigned long buttonDownCount = 0;
 
 void flashSTATUS_LED(uint8_t times = 3, uint16_t onTime = 100, uint16_t offTime = 100)
 {
-  for (uint8_t x = 0; x < times + 1; x++)
+  for (uint8_t x = 0; x < times; x++)
   {
     digitalWrite(STATUS_LED, HIGH);
     delay(onTime);
@@ -174,14 +174,8 @@ void loop()
     // ledHeartBeat = !ledHeartBeat;
     break;
   case PRESSED_LONG:
-    digitalWrite(STATUS_LED, HIGH);
-    delay(100);
-    digitalWrite(STATUS_LED, LOW);
-    delay(100);
-    digitalWrite(STATUS_LED, HIGH);
-    delay(100);
-    digitalWrite(STATUS_LED, LOW);
-    delay(100);
+    flashSTATUS_LED(3, 100, 100);
+    flashSTATUS_LED(3, 10, 100);
     goToSleep();
     break;
   }

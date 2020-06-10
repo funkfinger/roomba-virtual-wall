@@ -8,16 +8,19 @@
 
 #include <MilliTimer.h>
 
+extern const uint8_t gamma8[];
+
 #define MILLIS_PER_SECOND 1000
 #define MILLIS_PER_MINUTE 60000
 #define MILLIS_PER_HOUR 3600000
 
 #define STATUS_LED 0
 
+#define MAX_HOURS_ON 1
+
 #define BUTTON 2
 #define SHORT_BUTTON_PRESS 30
 #define LONG_BUTTON_PRESS 1000
-#define DEBOUNCE_BUTTON_PRESS 10
 #define NOT_PRESSED 1
 #define INITAL_PRESS 10
 #define PRESSED_SHORT 20
@@ -26,17 +29,10 @@
 #define PRESSED_LONG 30
 #define PRESSED_LONG_HAPPENED 35
 #define PRESSED_LONG_UP 38
-#define LONG_PRESS_UP 40
-#define BOUNCING 50
 
-#ifndef cbi
-#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= -_BV(bit))
-#endif
-#ifndef sbi
-#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
-#endif
-
-extern const uint8_t gamma8[];
+// system status...
+#define BEDTIME 1
+#define NORMAL 10
 
 MilliTimer pulsarTimer(3);
 MilliTimer secondTimer(MILLIS_PER_SECOND);
@@ -46,13 +42,27 @@ MilliTimer hourTimer(MILLIS_PER_HOUR);
 
 IRsend irsend;
 
-bool ledHeartBeat = false;
-bool currentlyOn = false;
-bool buttonPushed = false;
-
 uint8_t ledLevel = 0;
 bool ledUp = true;
-unsigned long buttonDownCount = 0;
+uint8_t hoursOn = 0;
+uint8_t buttonState = NOT_PRESSED;
+uint16_t buttonPressCounter = 0;
+uint8_t systemState = NORMAL;
+
+void resetSystem()
+{
+  pulsarTimer.reset();
+  secondTimer.reset();
+  fiveSecondTimer.reset();
+  minuteTimer.reset();
+  hourTimer.reset();
+  ledLevel = 0;
+  ledUp = true;
+  hoursOn = 0;
+  buttonState = NOT_PRESSED;
+  buttonPressCounter = 0;
+  systemState = NORMAL;
+}
 
 void flashSTATUS_LED(uint8_t times = 3, uint16_t onTime = 100, uint16_t offTime = 100)
 {
@@ -85,7 +95,7 @@ void setup()
   digitalWrite(BUTTON, HIGH);
   irsend.enableIROut(38);
   flashSTATUS_LED();
-  ledHeartBeat = true;
+  systemState = BEDTIME;
   delay(500);
 }
 
@@ -102,8 +112,6 @@ void doPulsar()
   analogWrite(STATUS_LED, pgm_read_byte(&gamma8[ledLevel]));
 }
 
-uint16_t buttonPressCounter = 0;
-uint8_t buttonState = NOT_PRESSED;
 uint8_t checkButton()
 {
   bool currentlyDown = !digitalRead(BUTTON);
@@ -150,6 +158,8 @@ uint8_t checkButton()
 
 void goToSleep()
 {
+  // listen for pin change interrupts...
+  bitSet(GIMSK, PCIE);
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);
   ADCSRA = 0;
   power_all_disable();
@@ -163,32 +173,61 @@ void goToSleep()
   }
 }
 
-void loop()
+void doButtonCheck()
 {
-  if (ledHeartBeat)
-    doPulsar();
   uint8_t buttonState = checkButton();
   switch (buttonState)
   {
   case PRESSED_SHORT:
-    // ledHeartBeat = !ledHeartBeat;
     break;
   case PRESSED_LONG:
-    flashSTATUS_LED(3, 100, 100);
     flashSTATUS_LED(3, 10, 100);
-    goToSleep();
+    systemState = BEDTIME;
     break;
   }
+}
 
+void doHourCheck()
+{
+  if (hourTimer.check())
+  {
+    hoursOn++;
+  }
+  if (hoursOn > MAX_HOURS_ON)
+  {
+    flashSTATUS_LED(100, 10, 100);
+    systemState = BEDTIME;
+  }
+}
+
+void doNormalState()
+{
+  // ignore pin change interrupts...
+  bitClear(GIMSK, PCIE);
+  doPulsar();
+  doButtonCheck();
+  doHourCheck();
   irsend.mark(1000);
   irsend.space(1000);
 }
 
+void loop()
+{
+  switch (systemState)
+  {
+  case BEDTIME:
+    goToSleep();
+    break;
+  case NORMAL:
+    doNormalState();
+  default:
+    doNormalState();
+  }
+}
+
 ISR(PCINT0_vect)
 {
-  ledLevel = 0;
-  ledUp = true;
-  buttonDownCount = 0;
+  resetSystem();
 }
 
 // from https://learn.adafruit.com/led-tricks-gamma-correction?view=all
